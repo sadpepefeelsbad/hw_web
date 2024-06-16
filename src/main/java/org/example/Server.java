@@ -1,15 +1,15 @@
 package org.example;
 
+import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
@@ -18,9 +18,11 @@ public class Server {
     private static final int PORT = 9999;
     private final List<String> validPaths = List.of("/index.html", "/spring.svg", "/spring.png", "/resources.html", "/styles.css", "/app.js", "/links.html", "/forms.html", "/classic.html", "/events.html", "/events.js");
     private final Executor executor;
+    private final HashMap<String, Map<String, Handler>> handlers;
 
     public Server(int threadPoolSize) {
         executor = Executors.newFixedThreadPool(threadPoolSize);
+        handlers = new HashMap<>();
     }
 
     public void start() {
@@ -46,63 +48,56 @@ public class Server {
 
     public void proceedConnection(Socket socket) throws IOException {
 
-        final var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
         final var out = new BufferedOutputStream(socket.getOutputStream());
+        var request = Request.createRequest(new BufferedInputStream(socket.getInputStream()));
 
-        // read only request line for simplicity
-        // must be in form GET /path HTTP/1.1
-        final var requestLine = in.readLine();
-        final var parts = requestLine.split(" ");
-
-        if (parts.length != 3) {
-            // just close socket
-            socket.close();
-        }
-
-        final var path = parts[1];
-        if (!validPaths.contains(path)) {
-            out.write((
-                    "HTTP/1.1 404 Not Found\r\n" +
-                            "Content-Length: 0\r\n" +
-                            "Connection: close\r\n" +
-                            "\r\n"
-            ).getBytes());
-            out.flush();
+        if (request == null) {
+            response404(out);
+        } else if (handlers.containsKey(request.getMethod()) && handlers.get(request.getMethod()).containsKey(request.getPath())) {
+            handlers.get(request.getMethod()).get(request.getPath()).handle(request, out);
         } else {
+            defaultHandler(request, out);
+        }
+    }
+
+    public void addHandler(String method, String path, Handler handler) {
+        if (!handlers.containsKey(method)) handlers.put(method, new HashMap<>());
+        handlers.get(method).put(path, handler);
+    }
+
+    private void defaultHandler(Request request, BufferedOutputStream out) throws IOException {
+
+        String path = request.getPath();
+
+        if (!validPaths.contains(path)) response404(out);
+        else {
 
             final var filePath = Path.of(".", "public", path);
             final var mimeType = Files.probeContentType(filePath);
 
-            // special case for classic
-            if (path.equals("/classic.html")) {
-                final var template = Files.readString(filePath);
-                final var content = template.replace(
-                        "{time}",
-                        LocalDateTime.now().toString()
-                ).getBytes();
-                out.write((
-                        "HTTP/1.1 200 OK\r\n" +
-                                "Content-Type: " + mimeType + "\r\n" +
-                                "Content-Length: " + content.length + "\r\n" +
-                                "Connection: close\r\n" +
-                                "\r\n"
-                ).getBytes());
-                out.write(content);
-                out.flush();
-            } else {
-
-                final var length = Files.size(filePath);
-                out.write((
-                        "HTTP/1.1 200 OK\r\n" +
-                                "Content-Type: " + mimeType + "\r\n" +
-                                "Content-Length: " + length + "\r\n" +
-                                "Connection: close\r\n" +
-                                "\r\n"
-                ).getBytes());
-                Files.copy(filePath, out);
-                out.flush();
-            }
+            final var length = Files.size(filePath);
+            out.write((
+                    "HTTP/1.1 200 OK\r\n" +
+                            "Content-Type: " + mimeType + "\r\n" +
+                            "Content-Length: " + length + "\r\n" +
+                            "Connection: close\r\n" +
+                            "\r\n"
+            ).getBytes());
+            Files.copy(filePath, out);
+            out.flush();
         }
+    }
+
+    private void response404(BufferedOutputStream out) throws IOException {
+        out.write((
+                """
+                        HTTP/1.1 404 Not Found\r
+                        Content-Length: 0\r
+                        Connection: close\r
+                        \r
+                        """
+        ).getBytes());
+        out.flush();
     }
 }
 

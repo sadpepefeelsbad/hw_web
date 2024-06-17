@@ -1,9 +1,16 @@
 package org.example;
 
+import org.apache.http.NameValuePair;
+import org.apache.http.client.utils.URLEncodedUtils;
+
 import java.io.BufferedInputStream;
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 
 public class Request {
 
@@ -13,14 +20,16 @@ public class Request {
     private final String method;
     private final String path;
     private final List<String> headers;
+    private final List<NameValuePair> params;
 
-    private Request(String method, String path, List<String> headers) {
+    private Request(String method, String path, List<String> headers, List<NameValuePair> params) {
         this.method = method;
         this.path = path;
         this.headers = headers;
+        this.params = params;
     }
 
-    public static Request createRequest(BufferedInputStream in) throws IOException {
+    public static Request createRequest(BufferedInputStream in) throws IOException, URISyntaxException {
 
         final List<String> allowedMethods = List.of(GET, POST);
         final var limit = 4096;
@@ -49,12 +58,14 @@ public class Request {
 
         final var path = requestLine[1];
 
+        List<NameValuePair> params = URLEncodedUtils.parse(new URI(path), StandardCharsets.UTF_8);
+
         // ищем заголовки
         final var headerDelimiter = new byte[]{'\r', '\n', '\r', '\n'};
         final var headersStart = requestLineEnd + requestLineDelimiter.length;
         final var headersEnd = indexOf(buffer, headerDelimiter, headersStart, read);
         if (headersEnd == -1) {
-            return new Request(method, path, null);
+            return new Request(method, path, null, params);
         }
 
         // отматываем на начало буфера
@@ -65,7 +76,7 @@ public class Request {
         final var headersBytes = in.readNBytes(headersEnd - headersStart);
         List<String> headers = Arrays.asList(new String(headersBytes).split("\r\n"));
 
-        return new Request(method, path, headers);
+        return new Request(method, path, headers, params);
     }
 
     // from Google guava with modifications
@@ -82,6 +93,16 @@ public class Request {
         return -1;
     }
 
+    public Optional<NameValuePair> getQueryParam(String name) {
+        return getQueryParams().stream()
+                .filter(param -> param.getName().equalsIgnoreCase(name))
+                .findFirst();
+    }
+
+    public List<NameValuePair> getQueryParams() {
+        return params;
+    }
+
     public String getMethod() {
         return method;
     }
@@ -93,5 +114,4 @@ public class Request {
     public List<String> getHeaders() {
         return headers;
     }
-
 }

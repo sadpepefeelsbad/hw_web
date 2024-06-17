@@ -5,6 +5,7 @@ import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -33,7 +34,7 @@ public class Server {
                     executor.execute(() -> {
                         try {
                             proceedConnection(serverSocket.accept());
-                        } catch (IOException e) {
+                        } catch (IOException | URISyntaxException e) {
                             System.out.println("Proceed exception: " + e);
                         }
                     });
@@ -46,10 +47,11 @@ public class Server {
         }
     }
 
-    public void proceedConnection(Socket socket) throws IOException {
+    public void proceedConnection(Socket socket) throws IOException, URISyntaxException {
 
         final var out = new BufferedOutputStream(socket.getOutputStream());
         var request = Request.createRequest(new BufferedInputStream(socket.getInputStream()));
+        System.out.println(request.getMethod() + "    " + request.getPath() + "     " + request.getHeaders());
 
         if (request == null) {
             response404(out);
